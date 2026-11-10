@@ -5,9 +5,9 @@
 <meta name="apple-mobile-web-app-title" content="Meal Planner">
 <title>Family Meal Planner</title>
 <style>
-:root{--bg:#faf7f2;--sf:#fff;--tx:#2b2a28;--mu:#7a756c;--ac:#c2512f;--ac2:#f6e3da;--bd:#e6e0d6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1a18;--sf:#262522;--tx:#efeae1;--mu:#a09a8f;--ac:#e8794f;--ac2:#3a2a22;--bd:#3a3834}}
-:root[data-theme="dark"]{--bg:#1b1a18;--sf:#262522;--tx:#efeae1;--mu:#a09a8f;--ac:#e8794f;--ac2:#3a2a22;--bd:#3a3834}
+:root{--bg:#f8f4e8;--sf:#fffdf6;--tx:#2b2a28;--mu:#6f6a5c;--ac:#4a6b3a;--ac2:#e3ebd6;--bd:#e2dac6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1a18;--sf:#262522;--tx:#efeae1;--mu:#a09a8f;--ac:#5a7f47;--ac2:#2a3424;--bd:#3a3834}}
+:root[data-theme="dark"]{--bg:#1b1a18;--sf:#262522;--tx:#efeae1;--mu:#a09a8f;--ac:#5a7f47;--ac2:#2a3424;--bd:#3a3834}
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--tx);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:16px 16px 96px;max-width:640px;margin:0 auto}
@@ -28,6 +28,7 @@ nav button.on{color:var(--ac);font-weight:700;background:none}
 .tag{display:inline-block;font-size:12px;background:var(--ac2);border-radius:99px;padding:2px 9px;margin-right:4px}
 .msg{background:var(--ac2);border-radius:10px;padding:10px 12px;margin:8px 0}
 .wrap{overflow-x:auto}
+a{color:var(--ac)}
 </style></head><body>
 <h1>Family Meal Planner</h1>
 <div id="app"></div>
@@ -123,7 +124,7 @@ async function pickModels(key){
 async function askAI(){
  const have=$("#fr").value.trim();S.fridge=have;save();
  if(!have){note="Add some ingredients first.";return render()}
- const key=getKey();if(!key){note="Add your free Gemini key first.";return render()}
+ const key=getKey();if(!key){note="Add your free Gemini key first. The steps are just below.";return render()}
  const fam=S.meals.map(m=>m.name+" ("+m.cat+"): "+m.ing.join(", ")+(m.fav?" [favourite]":"")).join("\n");
  const p="You help a family decide what to cook tonight. Their usual meals:\n"+fam+"\n\nIngredients they have: "+have+"\n\nSuggest 3 to 5 dishes they could cook mostly from these ingredients, in the spirit of what this family normally eats. Assume basic store-cupboard staples (oil, salt, pepper, stock) are available. Use British English. Reply with JSON only, no other text, as an array of objects: {\"name\":string,\"category\":one of \"Red meat\",\"Poultry\",\"Fish\",\"Vegetarian\",\"Other\",\"why\":one short sentence,\"ingredients\":[string],\"missing\":[string]}";
  if(aiCache.k===p&&aiCache.r.length){aiRes=aiCache.r;note="Same ingredients and meals as last time, so those ideas are reused and Google wasn’t asked again.";return render()}
@@ -160,6 +161,22 @@ async function askAI(){
   aiBusy=false;render()
  }
 }
+function keyHelp(){
+ return `<div class="card"><b>Turn on AI ideas (free, about 2 minutes)</b>
+ <div class="mu" style="margin-top:6px">This is optional. The app needs a free “key” from Google. It works like a password that lets this app ask Google for ideas. You just need a Google account (for example, a Gmail address).</div>
+ <ol style="padding-left:20px;margin:10px 0">
+ <li><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Tap here to open Google’s key page</a>. It opens in a new tab.</li>
+ <li>Sign in with your Google account if it asks you to.</li>
+ <li>If it asks you to agree to terms, tick the box and tap Continue.</li>
+ <li>Tap <b>Create API key</b>. It’s usually the button in the top right of the page. If it asks which project to use, choose “Create API key in new project”.</li>
+ <li>A long code appears. Tap the copy button beside it to copy all of it.</li>
+ <li>Come back to this page, paste the code into the box below and tap <b>Save key</b>.</li>
+ </ol>
+ <input id="gk" placeholder="Paste your key here" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false">
+ <div style="margin-top:8px"><button class="p s" data-a="sk">Save key</button></div>
+ <div class="mu" style="margin-top:10px">Can’t get a key? Work and school Google accounts often block this, so try a personal Gmail account. Google’s AI Studio is also not available in every country.</div>
+ <div class="mu" style="margin-top:6px">Your meal names and ingredients are sent to Google when you ask for ideas, so keep them non-private. Keep your key to yourself, too.</div></div>`
+}
 function render(){
  $("#nav").innerHTML=TABS.map(([k,l])=>`<button data-a="tab" data-k="${k}" class="${tab===k?"on":""}">${l}</button>`).join("");
  const a=$("#app");let h=note?`<div class="msg">${esc(note)}</div>`:"";
@@ -185,7 +202,7 @@ function render(){
   h+=`<div class="card"><b>What have you got?</b><div class="mu">Type ingredients separated by commas.</div>
   <div style="margin-top:8px"><textarea id="fr" placeholder="chicken, rice, peppers, onion">${esc(S.fridge||"")}</textarea></div>
   <div class="row" style="margin-top:8px;gap:8px"><button data-a="local" style="flex:1">Match my meals</button><button class="p" data-a="ai" style="flex:1" ${aiBusy?"disabled":""}>${aiBusy?"Thinking...":"Ask for ideas"}</button></div>
-  </div>${getKey()?"":`<div class="card"><b>Turn on AI ideas (free)</b><ol class="mu" style="padding-left:20px;margin:6px 0"><li>Go to aistudio.google.com/app/apikey and sign in with Google</li><li>Accept the terms and tap Create API key</li><li>Paste the key below</li></ol><input id="gk" placeholder="Paste your key" autocapitalize="off" autocorrect="off"><div style="margin-top:8px"><button class="p s" data-a="sk">Save key</button></div></div>`}`;
+  </div>${getKey()?"":keyHelp()}`;
   if(local.length)h+=`<h2>From your own meals</h2>`+local.map(r=>`<div class="card"><b>${esc(r.m.name)}</b> <span class="mu">(${r.got} of ${r.m.ing.length} ingredients)</span>${r.miss.length?`<div class="mu">Still need: ${esc(r.miss.join(", "))}</div>`:`<div class="mu">You have everything.</div>`}</div>`).join("");
   if(aiRes.length)h+=`<h2>Ideas</h2>`+aiRes.map((r,i)=>`<div class="card"><b>${esc(r.name||"")}</b> <span class="tag">${esc(r.category||"")}</span><div>${esc(r.why||"")}</div>${(r.missing||[]).length?`<div class="mu">Still need: ${esc(r.missing.join(", "))}</div>`:""}<div style="margin-top:8px"><button class="s" data-a="save" data-i="${i}">Add to my meals</button></div></div>`).join("");
  }
@@ -193,7 +210,7 @@ function render(){
   h+=`<div class="card"><b>Back up or share</b><div class="mu">Everything is stored on this device only. Copy the text below to move your meals to another device, or send it to someone so they can paste it into theirs.</div>
   <div style="margin-top:8px"><textarea id="ex" style="min-height:160px">${esc(JSON.stringify({meals:S.meals,rules:S.rules,n:S.n}))}</textarea></div>
   <div class="row" style="margin-top:8px;gap:8px"><button data-a="copy" style="flex:1">Copy</button><button class="p" data-a="imp" style="flex:1">Load pasted text</button></div></div>
-  <div class="card"><b>AI key</b><div class="mu">${getKey()?"A key is saved on this device.":"No key saved. Get a free one at aistudio.google.com/app/apikey."} It never leaves your phone except to ask Google for ideas. Free-tier Gemini requests may be used by Google to improve its products, so keep questions non-private.</div><div style="margin-top:8px"><input id="gk" placeholder="Paste a new key" autocapitalize="off" autocorrect="off"></div><div class="row" style="margin-top:8px;gap:8px"><button class="p" data-a="sk" style="flex:1">Save key</button><button data-a="rk" style="flex:1">Remove key</button></div></div>
+  <div class="card"><b>AI key</b><div class="mu">${getKey()?"A key is saved on this device.":"No key saved. You can get a free one by following the steps on the Fridge tab."} It never leaves your phone except to ask Google for ideas. Free-tier Gemini requests may be used by Google to improve its products, so keep questions non-private.</div><div style="margin-top:8px"><input id="gk" placeholder="Paste a new key" autocapitalize="off" autocorrect="off"></div><div class="row" style="margin-top:8px;gap:8px"><button class="p" data-a="sk" style="flex:1">Save key</button><button data-a="rk" style="flex:1">Remove key</button></div></div>
   <div class="card"><button data-a="reset">Reset to starter meals</button></div>`;
  }
  a.innerHTML=h
@@ -209,7 +226,7 @@ document.addEventListener("click",e=>{
   S.meals.unshift({id:Math.random().toString(36).slice(2,9),name:n,cat:$("#mc").value,ing:list($("#mi").value),fav:false});note="";save();return render()}
  if(a==="fav"){const m=get(b.dataset.id);m.fav=!m.fav;save();return render()}
  if(a==="del"){S.meals=S.meals.filter(m=>m.id!==b.dataset.id);S.plan=S.plan.filter(p=>p.id!==b.dataset.id);save();return render()}
- if(a==="sk"){const v=($("#gk").value||"").trim();if(v.length<20){note="That doesn’t look like a key.";return render()}setKey(v);note="Key saved on this device.";return render()}
+ if(a==="sk"){const v=($("#gk").value||"").replace(/[\s"'“”‘’]/g,"");if(v.length<20){note="That doesn’t look like a key. It’s a long code, usually starting with AIza. Check that you’ve pasted all of it.";return render()}setKey(v);note="Key saved on this device. AI ideas are now switched on.";return render()}
  if(a==="rk"){setKey("");note="Key removed.";return render()}
  if(a==="local")return matchLocal();
  if(a==="ai")return askAI();
