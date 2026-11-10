@@ -91,46 +91,74 @@ function matchLocal(){
   .sort((a,b)=>(b.got/b.m.ing.length)-(a.got/a.m.ing.length)||b.got-a.got).slice(0,6);
  note=local.length?"":"Nothing in your meals matches those ingredients yet.";render()
 }
-async function pickModels(key){
- let m=[];try{m=JSON.parse(localStorage.getItem("mealplanner.models")||"[]")}catch(e){}
- if(m.length)return m;
- let r;try{r=await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",{headers:{"x-goog-api-key":key}})}catch(x){x.net=true;throw x}
- if(!r.ok)throw await httpErr(r);
- const d=await r.json();
- const ok=(d.models||[]).filter(x=>(x.supportedGenerationMethods||[]).includes("generateContent")&&/flash/.test(x.name)&&!/image|tts|live|audio|exp|preview|robotics|computer|embed|thinking|latest/.test(x.name)).map(x=>x.name.replace("models/",""));
- const srt=l=>l.sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}));
- m=srt(ok.filter(x=>!/lite/.test(x))).concat(srt(ok.filter(x=>/lite/.test(x)))).slice(0,5);
- if(!m.length)m=["gemini-2.5-flash"];
- try{localStorage.setItem("mealplanner.models",JSON.stringify(m))}catch(e){}return m
+const TIMEOUT=20000;
+const GAPI="https://generativelanguage.googleapis.com/v1beta/models";
+let aiCache={k:"",r:[]};
+async function gcall(url,opts){
+ const c=new AbortController(),t=setTimeout(()=>c.abort(),TIMEOUT);
+ try{
+  const res=await fetch(url,Object.assign({signal:c.signal},opts));
+  let body=null;
+  try{body=await res.json()}catch(x){if(c.signal.aborted)throw x}
+  return{ok:res.ok,status:res.status,body}
+ }catch(x){
+  const e=new Error(c.signal.aborted?"timeout":"network");
+  if(c.signal.aborted){e.timeout=true}else{e.net=true}
+  throw e
+ }finally{clearTimeout(t)}
 }
-async function httpErr(r){const er=new Error("http");er.status=r.status;try{er.detail=((await r.json()).error||{}).message||""}catch(x){}return er}
+function httpErr(r){const er=new Error("http");er.status=r.status;er.detail=((r.body||{}).error||{}).message||"";return er}
+async function pickModels(key){
+ let m=[];try{m=JSON.parse(localStorage.getItem("mealplanner.models2")||"[]")}catch(e){}
+ if(m.length)return m;
+ const r=await gcall(GAPI+"?pageSize=200",{headers:{"x-goog-api-key":key}});
+ if(!r.ok)throw httpErr(r);
+ const ok=((r.body||{}).models||[]).filter(x=>(x.supportedGenerationMethods||[]).includes("generateContent")&&/flash/.test(x.name)&&!/image|tts|live|audio|exp|preview|robotics|computer|embed|thinking|latest/.test(x.name)).map(x=>x.name.replace("models/",""));
+ const srt=l=>l.sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}));
+ const lite=srt(ok.filter(x=>/lite/.test(x)))[0],full=srt(ok.filter(x=>!/lite/.test(x)))[0];
+ m=[lite,full].filter(Boolean);
+ if(!m.length)m=["gemini-2.5-flash"];
+ try{localStorage.setItem("mealplanner.models2",JSON.stringify(m));localStorage.removeItem("mealplanner.models")}catch(e){}return m
+}
 async function askAI(){
  const have=$("#fr").value.trim();S.fridge=have;save();
  if(!have){note="Add some ingredients first.";return render()}
  const key=getKey();if(!key){note="Add your free Gemini key first.";return render()}
- aiBusy=true;note="";render();
  const fam=S.meals.map(m=>m.name+" ("+m.cat+"): "+m.ing.join(", ")+(m.fav?" [favourite]":"")).join("\n");
  const p="You help a family decide what to cook tonight. Their usual meals:\n"+fam+"\n\nIngredients they have: "+have+"\n\nSuggest 3 to 5 dishes they could cook mostly from these ingredients, in the spirit of what this family normally eats. Assume basic store-cupboard staples (oil, salt, pepper, stock) are available. Use British English. Reply with JSON only, no other text, as an array of objects: {\"name\":string,\"category\":one of \"Red meat\",\"Poultry\",\"Fish\",\"Vegetarian\",\"Other\",\"why\":one short sentence,\"ingredients\":[string],\"missing\":[string]}";
+ if(aiCache.k===p&&aiCache.r.length){aiRes=aiCache.r;note="Same ingredients and meals as last time, so those ideas are reused and Google wasn’t asked again.";return render()}
+ aiBusy=true;note="";render();
  try{
-  let models=await pickModels(key),data=null,last=null;
-  for(let pass=0;pass<3&&!data;pass++){
-  for(const model of models){
-   let res;try{res=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":key},body:JSON.stringify({contents:[{parts:[{text:p}]}],generationConfig:{responseMimeType:"application/json"}})})}catch(x){x.net=true;throw x}
-   if(res.ok){data=await res.json();models=[model].concat(models.filter(x=>x!==model));try{localStorage.setItem("mealplanner.models",JSON.stringify(models))}catch(x){}break}
-   last=await httpErr(res);
-   if(res.status===404){try{localStorage.removeItem("mealplanner.models")}catch(x){}}
+  const models=await pickModels(key);
+  let data=null,last=null;
+  for(let i=0;i<models.length;i++){
+   const res=await gcall(GAPI+"/"+models[i]+":generateContent",{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":key},body:JSON.stringify({contents:[{parts:[{text:p}]}],generationConfig:{responseMimeType:"application/json"}})});
+   if(res.ok){data=res.body;break}
+   last=httpErr(res);
+   if(res.status===404){try{localStorage.removeItem("mealplanner.models2")}catch(x){}}
    if(![404,429,503].includes(res.status))throw last;
-  }
-  if(data||!last||last.status!==503)break;
-  await new Promise(z=>setTimeout(z,2500));
   }
   if(!data)throw last;
   const parts=data.candidates&&data.candidates[0]&&data.candidates[0].content&&data.candidates[0].content.parts;
   if(!parts)throw new Error("Google sent an empty answer");
-  const r=JSON.parse(parts.map(x=>x.text||"").join("").replace(/```json|```/g,"").trim());aiRes=Array.isArray(r)?r:[]}
- catch(e){aiRes=[];const st=e&&e.status;const dt=e&&(e.detail||e.message)?" ("+(st?st+": ":"")+String(e.detail||e.message).slice(0,200)+")":"";
-  note=st===503?"Google’s AI is very busy right now. That’s on Google’s side, not your key. Wait a minute and try again. The ingredient matcher still works.":st===429?"Google says you’ve hit a free limit"+dt+". It could be a per-minute or a daily limit, so wait a minute and try again. You can see your limits at aistudio.google.com/rate-limit. The ingredient matcher still works.":(st===400||st===401||st===403)?"Google didn’t accept that key. Check it in the Backup tab."+dt:e&&e.net?"Couldn’t reach Google. Check your connection. (This also happens if the page is opened inside Claude, which blocks outside requests.)":"Couldn’t get suggestions this time."+dt}
- aiBusy=false;render()
+  const r=JSON.parse(parts.map(x=>x.text||"").join("").replace(/```json|```/g,"").trim());
+  aiRes=Array.isArray(r)?r:[];
+  aiCache={k:p,r:aiRes};
+ }catch(e){
+  aiRes=[];
+  const st=e&&e.status;
+  let dt="",pre="";
+  if(st){pre=st+": "}
+  if(e&&(e.detail||e.message)){dt=" ("+pre+String(e.detail||e.message).slice(0,200)+")"}
+  if(e&&e.timeout){note="Google took too long to answer, so I stopped waiting. Try again in a moment. The ingredient matcher still works."}
+  else if(st===503){note="Google’s AI is very busy right now. That’s on Google’s side, not your key. Wait a minute and try again. The ingredient matcher still works."}
+  else if(st===429){note="Google says you’ve hit a free limit"+dt+". It could be a per-minute or a daily limit, so wait a minute and try again. You can see your limits at aistudio.google.com/rate-limit. The ingredient matcher still works."}
+  else if(st===400||st===401||st===403){note="Google didn’t accept that key. Check it in the Backup tab."+dt}
+  else if(e&&e.net){note="Couldn’t reach Google. Check your connection. (This also happens if the page is opened inside Claude, which blocks outside requests.)"}
+  else{note="Couldn’t get suggestions this time."+dt}
+ }finally{
+  aiBusy=false;render()
+ }
 }
 function render(){
  $("#nav").innerHTML=TABS.map(([k,l])=>`<button data-a="tab" data-k="${k}" class="${tab===k?"on":""}">${l}</button>`).join("");
