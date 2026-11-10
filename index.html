@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Meal Planner">
+<title>Family Meal Planner</title>
+<style>
+:root{--bg:#faf7f2;--sf:#fff;--tx:#2b2a28;--mu:#7a756c;--ac:#c2512f;--ac2:#f6e3da;--bd:#e6e0d6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1a18;--sf:#262522;--tx:#efeae1;--mu:#a09a8f;--ac:#e8794f;--ac2:#3a2a22;--bd:#3a3834}}
+:root[data-theme="dark"]{--bg:#1b1a18;--sf:#262522;--tx:#efeae1;--mu:#a09a8f;--ac:#e8794f;--ac2:#3a2a22;--bd:#3a3834}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:16px 16px 96px;max-width:640px;margin:0 auto}
+h1{font-size:22px;margin:4px 0 14px}h2{font-size:17px;margin:18px 0 8px}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.mu{color:var(--mu);font-size:14px}
+button{font:inherit;border:1px solid var(--bd);background:var(--sf);color:var(--tx);border-radius:10px;padding:9px 13px;cursor:pointer}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600}
+button.s{padding:5px 10px;font-size:14px}
+button.on{background:var(--ac2);border-color:var(--ac)}
+input,select,textarea{font:inherit;width:100%;padding:9px 11px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx)}
+textarea{min-height:84px}
+.g{display:grid;grid-template-columns:1fr 64px 64px;gap:8px;align-items:center}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--sf);border-top:1px solid var(--bd);padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px))}
+nav button{flex:1;border:0;background:none;padding:10px 4px;font-size:14px;color:var(--mu)}
+nav button.on{color:var(--ac);font-weight:700;background:none}
+.tag{display:inline-block;font-size:12px;background:var(--ac2);border-radius:99px;padding:2px 9px;margin-right:4px}
+.msg{background:var(--ac2);border-radius:10px;padding:10px 12px;margin:8px 0}
+.wrap{overflow-x:auto}
+</style></head><body>
+<h1>Family Meal Planner</h1>
+<div id="app"></div>
+<nav id="nav"></nav>
+<script>
+const CATS=["Red meat","Poultry","Fish","Vegetarian","Other"];
+const KEY="mealplanner.v1";
+const TABS=[["plan","Plan"],["meals","Meals"],["fridge","Fridge"],["data","Backup"]];
+let tab="plan",note="",ai=null,aiBusy=false,aiRes=[],local=[];
+let S=load();
+const MODEL="gemini-2.5-flash";
+function getKey(){try{return localStorage.getItem("mealplanner.gkey")||""}catch(e){return ""}}
+function setKey(k){try{k?localStorage.setItem("mealplanner.gkey",k):localStorage.removeItem("mealplanner.gkey")}catch(e){}}
+function seed(){
+ const m=(n,c,i)=>({id:Math.random().toString(36).slice(2,9),name:n,cat:c,ing:i.split(",").map(x=>x.trim()),fav:false});
+ const r={};CATS.forEach(k=>r[k]={min:0,max:7});r["Red meat"].max=2;r["Fish"].min=1;
+ return{n:7,rules:r,plan:[],fridge:"",meals:[
+  m("Spaghetti bolognese","Red meat","beef mince, spaghetti, tomatoes, onion, garlic"),
+  m("Sunday roast beef","Red meat","beef joint, potatoes, carrots, gravy"),
+  m("Sausage and mash","Red meat","sausages, potatoes, onion, peas"),
+  m("Roast chicken","Poultry","chicken, potatoes, carrots, onion"),
+  m("Chicken curry","Poultry","chicken, onion, tomatoes, rice, curry paste"),
+  m("Chicken fajitas","Poultry","chicken, peppers, onion, tortillas"),
+  m("Salmon and veg","Fish","salmon, broccoli, potatoes"),
+  m("Fish pie","Fish","white fish, potatoes, milk, peas"),
+  m("Tuna pasta bake","Fish","tuna, pasta, sweetcorn, cheese"),
+  m("Vegetable stir fry","Vegetarian","peppers, broccoli, noodles, soy sauce"),
+  m("Margherita pizza","Vegetarian","pizza base, tomatoes, mozzarella"),
+  m("Cheese omelette","Vegetarian","eggs, cheese, salad")]}
+}
+function load(){try{const r=localStorage.getItem(KEY);if(r){const d=JSON.parse(r);if(d&&d.meals&&d.rules)return d}}catch(e){}return seed()}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const get=id=>S.meals.find(m=>m.id===id);
+const list=t=>t.split(/[,\n]/).map(x=>x.trim().toLowerCase()).filter(Boolean);
+function counts(ids){const c={};CATS.forEach(k=>c[k]=0);ids.forEach(i=>{const m=get(i);if(m)c[m.cat]++});return c}
+function ok(ids){const c=counts(ids);return ids.length===S.n&&CATS.every(k=>c[k]>=S.rules[k].min&&c[k]<=S.rules[k].max)}
+function ranked(ex){return S.meals.filter(m=>!ex.includes(m.id)).map(m=>[Math.random()-(m.fav?.35:0),m]).sort((a,b)=>a[0]-b[0]).map(x=>x[1])}
+function generate(){
+ const locked=S.plan.filter(p=>p.locked&&get(p.id)).map(p=>p.id);
+ for(let t=0;t<300;t++){
+  const pick=locked.slice(),pool=ranked(pick);
+  for(const k of CATS)for(const m of pool){if(pick.length>=S.n||counts(pick)[k]>=S.rules[k].min)break;if(m.cat===k&&!pick.includes(m.id))pick.push(m.id)}
+  for(const m of pool){if(pick.length>=S.n)break;if(!pick.includes(m.id)&&counts(pick)[m.cat]<S.rules[m.cat].max)pick.push(m.id)}
+  if(ok(pick)){S.plan=pick.map(id=>({id,locked:locked.includes(id)}));note="";save();return render()}
+ }
+ note="Those rules can’t be met with your current meals. Add more meals, or loosen a rule (for example, lower a minimum).";render()
+}
+function swap(i){
+ const cur=S.plan.map(p=>p.id);
+ for(const m of ranked(cur)){const t=cur.slice();t[i]=m.id;if(ok(t)){S.plan[i]={id:m.id,locked:false};note="";save();return render()}}
+ note="No other meal fits the rules for that slot.";render()
+}
+function shopping(){const s={};S.plan.forEach(p=>{const m=get(p.id);if(m)m.ing.forEach(x=>{const k=x.toLowerCase();s[k]=(s[k]||0)+1})});return Object.entries(s).sort((a,b)=>a[0].localeCompare(b[0]))}
+function matchLocal(){
+ const have=list($("#fr").value);S.fridge=$("#fr").value;save();
+ local=S.meals.map(m=>{const ing=m.ing.map(x=>x.toLowerCase());
+  const got=ing.filter(x=>have.some(h=>x.includes(h)||h.includes(x)));
+  return{m,got:got.length,miss:ing.filter(x=>!got.includes(x))}}).filter(r=>r.got>0)
+  .sort((a,b)=>(b.got/b.m.ing.length)-(a.got/a.m.ing.length)||b.got-a.got).slice(0,6);
+ note=local.length?"":"Nothing in your meals matches those ingredients yet.";render()
+}
+async function pickModels(key){
+ let m=[];try{m=JSON.parse(localStorage.getItem("mealplanner.models")||"[]")}catch(e){}
+ if(m.length)return m;
+ let r;try{r=await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",{headers:{"x-goog-api-key":key}})}catch(x){x.net=true;throw x}
+ if(!r.ok)throw await httpErr(r);
+ const d=await r.json();
+ const ok=(d.models||[]).filter(x=>(x.supportedGenerationMethods||[]).includes("generateContent")&&/flash/.test(x.name)&&!/image|tts|live|audio|exp|preview|robotics|computer|embed|thinking|latest/.test(x.name)).map(x=>x.name.replace("models/",""));
+ const srt=l=>l.sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}));
+ m=srt(ok.filter(x=>!/lite/.test(x))).concat(srt(ok.filter(x=>/lite/.test(x)))).slice(0,5);
+ if(!m.length)m=["gemini-2.5-flash"];
+ try{localStorage.setItem("mealplanner.models",JSON.stringify(m))}catch(e){}return m
+}
+async function httpErr(r){const er=new Error("http");er.status=r.status;try{er.detail=((await r.json()).error||{}).message||""}catch(x){}return er}
+async function askAI(){
+ const have=$("#fr").value.trim();S.fridge=have;save();
+ if(!have){note="Add some ingredients first.";return render()}
+ const key=getKey();if(!key){note="Add your free Gemini key first.";return render()}
+ aiBusy=true;note="";render();
+ const fam=S.meals.map(m=>m.name+" ("+m.cat+"): "+m.ing.join(", ")+(m.fav?" [favourite]":"")).join("\n");
+ const p="You help a family decide what to cook tonight. Their usual meals:\n"+fam+"\n\nIngredients they have: "+have+"\n\nSuggest 3 to 5 dishes they could cook mostly from these ingredients, in the spirit of what this family normally eats. Assume basic store-cupboard staples (oil, salt, pepper, stock) are available. Use British English. Reply with JSON only, no other text, as an array of objects: {\"name\":string,\"category\":one of \"Red meat\",\"Poultry\",\"Fish\",\"Vegetarian\",\"Other\",\"why\":one short sentence,\"ingredients\":[string],\"missing\":[string]}";
+ try{
+  let models=await pickModels(key),data=null,last=null;
+  for(let pass=0;pass<3&&!data;pass++){
+  for(const model of models){
+   let res;try{res=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent",{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":key},body:JSON.stringify({contents:[{parts:[{text:p}]}],generationConfig:{responseMimeType:"application/json"}})})}catch(x){x.net=true;throw x}
+   if(res.ok){data=await res.json();models=[model].concat(models.filter(x=>x!==model));try{localStorage.setItem("mealplanner.models",JSON.stringify(models))}catch(x){}break}
+   last=await httpErr(res);
+   if(res.status===404){try{localStorage.removeItem("mealplanner.models")}catch(x){}}
+   if(![404,429,503].includes(res.status))throw last;
+  }
+  if(data||!last||last.status!==503)break;
+  await new Promise(z=>setTimeout(z,2500));
+  }
+  if(!data)throw last;
+  const parts=data.candidates&&data.candidates[0]&&data.candidates[0].content&&data.candidates[0].content.parts;
+  if(!parts)throw new Error("Google sent an empty answer");
+  const r=JSON.parse(parts.map(x=>x.text||"").join("").replace(/```json|```/g,"").trim());aiRes=Array.isArray(r)?r:[]}
+ catch(e){aiRes=[];const st=e&&e.status;const dt=e&&(e.detail||e.message)?" ("+(st?st+": ":"")+String(e.detail||e.message).slice(0,200)+")":"";
+  note=st===503?"Google’s AI is very busy right now. That’s on Google’s side, not your key. Wait a minute and try again. The ingredient matcher still works.":st===429?"Google says you’ve hit a free limit"+dt+". It could be a per-minute or a daily limit, so wait a minute and try again. You can see your limits at aistudio.google.com/rate-limit. The ingredient matcher still works.":(st===400||st===401||st===403)?"Google didn’t accept that key. Check it in the Backup tab."+dt:e&&e.net?"Couldn’t reach Google. Check your connection. (This also happens if the page is opened inside Claude, which blocks outside requests.)":"Couldn’t get suggestions this time."+dt}
+ aiBusy=false;render()
+}
+function render(){
+ $("#nav").innerHTML=TABS.map(([k,l])=>`<button data-a="tab" data-k="${k}" class="${tab===k?"on":""}">${l}</button>`).join("");
+ const a=$("#app");let h=note?`<div class="msg">${esc(note)}</div>`:"";
+ if(tab==="plan"){
+  h+=`<div class="card"><div class="row"><b>Meals this week</b><span><button class="s" data-a="n" data-d="-1">-</button> <b>${S.n}</b> <button class="s" data-a="n" data-d="1">+</button></span></div>
+  <h2>Rules</h2><div class="g mu"><span></span><span>At least</span><span>At most</span></div>
+  ${CATS.map(k=>`<div class="g" style="margin-top:6px"><span>${k}</span><input type="number" min="0" max="14" inputmode="numeric" data-a="rule" data-k="${k}" data-f="min" value="${S.rules[k].min}"><input type="number" min="0" max="14" inputmode="numeric" data-a="rule" data-k="${k}" data-f="max" value="${S.rules[k].max}"></div>`).join("")}
+  <div style="margin-top:12px"><button class="p" data-a="gen" style="width:100%">${S.plan.length?"Regenerate (keeps locked meals)":"Generate my week"}</button></div></div>`;
+  if(S.plan.length){
+   h+=S.plan.map((p,i)=>{const m=get(p.id);if(!m)return"";return`<div class="card"><div class="row"><div><b>${esc(m.name)}</b><br><span class="tag">${m.cat}</span></div><div><button class="s ${p.locked?"on":""}" data-a="lock" data-i="${i}">${p.locked?"Locked":"Lock"}</button> <button class="s" data-a="swap" data-i="${i}">Swap</button></div></div></div>`}).join("");
+   h+=`<h2>Shopping list</h2><div class="card">${shopping().map(([k,n])=>`<div>${esc(k)}${n>1?` <span class="mu">x${n}</span>`:""}</div>`).join("")}</div>`;
+  }
+ }
+ if(tab==="meals"){
+  h+=`<div class="card"><b>Add a meal</b><div style="margin-top:8px"><input id="mn" placeholder="Meal name"></div>
+  <div style="margin-top:8px"><select id="mc">${CATS.map(k=>`<option>${k}</option>`).join("")}</select></div>
+  <div style="margin-top:8px"><input id="mi" placeholder="Ingredients, separated by commas"></div>
+  <div style="margin-top:8px"><button class="p" data-a="add">Add meal</button></div></div>
+  <div class="mu" style="margin:6px 2px">Star your family favourites; they get picked more often.</div>`;
+  h+=S.meals.map(m=>`<div class="card"><div class="row"><div><b>${esc(m.name)}</b> <span class="tag">${m.cat}</span><div class="mu">${esc(m.ing.join(", "))}</div></div><div style="white-space:nowrap"><button class="s ${m.fav?"on":""}" data-a="fav" data-id="${m.id}">${m.fav?"Favourite":"Star"}</button> <button class="s" data-a="del" data-id="${m.id}">Delete</button></div></div></div>`).join("");
+ }
+ if(tab==="fridge"){
+  h+=`<div class="card"><b>What have you got?</b><div class="mu">Type ingredients separated by commas.</div>
+  <div style="margin-top:8px"><textarea id="fr" placeholder="chicken, rice, peppers, onion">${esc(S.fridge||"")}</textarea></div>
+  <div class="row" style="margin-top:8px;gap:8px"><button data-a="local" style="flex:1">Match my meals</button><button class="p" data-a="ai" style="flex:1" ${aiBusy?"disabled":""}>${aiBusy?"Thinking...":"Ask for ideas"}</button></div>
+  </div>${getKey()?"":`<div class="card"><b>Turn on AI ideas (free)</b><ol class="mu" style="padding-left:20px;margin:6px 0"><li>Go to aistudio.google.com/app/apikey and sign in with Google</li><li>Accept the terms and tap Create API key</li><li>Paste the key below</li></ol><input id="gk" placeholder="Paste your key" autocapitalize="off" autocorrect="off"><div style="margin-top:8px"><button class="p s" data-a="sk">Save key</button></div></div>`}`;
+  if(local.length)h+=`<h2>From your own meals</h2>`+local.map(r=>`<div class="card"><b>${esc(r.m.name)}</b> <span class="mu">(${r.got} of ${r.m.ing.length} ingredients)</span>${r.miss.length?`<div class="mu">Still need: ${esc(r.miss.join(", "))}</div>`:`<div class="mu">You have everything.</div>`}</div>`).join("");
+  if(aiRes.length)h+=`<h2>Ideas</h2>`+aiRes.map((r,i)=>`<div class="card"><b>${esc(r.name||"")}</b> <span class="tag">${esc(r.category||"")}</span><div>${esc(r.why||"")}</div>${(r.missing||[]).length?`<div class="mu">Still need: ${esc(r.missing.join(", "))}</div>`:""}<div style="margin-top:8px"><button class="s" data-a="save" data-i="${i}">Add to my meals</button></div></div>`).join("");
+ }
+ if(tab==="data"){
+  h+=`<div class="card"><b>Back up or share</b><div class="mu">Everything is stored on this device only. Copy the text below to move your meals to another device, or send it to someone so they can paste it into theirs.</div>
+  <div style="margin-top:8px"><textarea id="ex" style="min-height:160px">${esc(JSON.stringify({meals:S.meals,rules:S.rules,n:S.n}))}</textarea></div>
+  <div class="row" style="margin-top:8px;gap:8px"><button data-a="copy" style="flex:1">Copy</button><button class="p" data-a="imp" style="flex:1">Load pasted text</button></div></div>
+  <div class="card"><b>AI key</b><div class="mu">${getKey()?"A key is saved on this device.":"No key saved. Get a free one at aistudio.google.com/app/apikey."} It never leaves your phone except to ask Google for ideas. Free-tier Gemini requests may be used by Google to improve its products, so keep questions non-private.</div><div style="margin-top:8px"><input id="gk" placeholder="Paste a new key" autocapitalize="off" autocorrect="off"></div><div class="row" style="margin-top:8px;gap:8px"><button class="p" data-a="sk" style="flex:1">Save key</button><button data-a="rk" style="flex:1">Remove key</button></div></div>
+  <div class="card"><button data-a="reset">Reset to starter meals</button></div>`;
+ }
+ a.innerHTML=h
+}
+document.addEventListener("click",e=>{
+ const b=e.target.closest("[data-a]");if(!b||b.tagName==="INPUT")return;const a=b.dataset.a;
+ if(a==="tab"){tab=b.dataset.k;note="";return render()}
+ if(a==="n"){S.n=Math.max(1,Math.min(14,S.n+Number(b.dataset.d)));save();return render()}
+ if(a==="gen")return generate();
+ if(a==="swap")return swap(Number(b.dataset.i));
+ if(a==="lock"){const p=S.plan[Number(b.dataset.i)];p.locked=!p.locked;save();return render()}
+ if(a==="add"){const n=$("#mn").value.trim();if(!n){note="Give the meal a name.";return render()}
+  S.meals.unshift({id:Math.random().toString(36).slice(2,9),name:n,cat:$("#mc").value,ing:list($("#mi").value),fav:false});note="";save();return render()}
+ if(a==="fav"){const m=get(b.dataset.id);m.fav=!m.fav;save();return render()}
+ if(a==="del"){S.meals=S.meals.filter(m=>m.id!==b.dataset.id);S.plan=S.plan.filter(p=>p.id!==b.dataset.id);save();return render()}
+ if(a==="sk"){const v=($("#gk").value||"").trim();if(v.length<20){note="That doesn’t look like a key.";return render()}setKey(v);note="Key saved on this device.";return render()}
+ if(a==="rk"){setKey("");note="Key removed.";return render()}
+ if(a==="local")return matchLocal();
+ if(a==="ai")return askAI();
+ if(a==="save"){const r=aiRes[Number(b.dataset.i)];const c=CATS.includes(r.category)?r.category:"Other";
+  S.meals.unshift({id:Math.random().toString(36).slice(2,9),name:String(r.name||"New meal"),cat:c,ing:(r.ingredients||[]).map(x=>String(x).toLowerCase()),fav:false});save();note="Added to your meals.";return render()}
+ if(a==="copy"){const t=$("#ex");t.select();try{navigator.clipboard.writeText(t.value)}catch(x){document.execCommand&&document.execCommand("copy")}note="Copied.";return render()}
+ if(a==="imp"){try{const d=JSON.parse($("#ex").value);if(!Array.isArray(d.meals))throw 0;
+  S.meals=d.meals.map(m=>({id:m.id||Math.random().toString(36).slice(2,9),name:String(m.name),cat:CATS.includes(m.cat)?m.cat:"Other",ing:(m.ing||[]).map(String),fav:!!m.fav}));
+  if(d.rules)CATS.forEach(k=>{if(d.rules[k])S.rules[k]=d.rules[k]});if(d.n)S.n=d.n;S.plan=[];save();note="Loaded "+S.meals.length+" meals."}catch(x){note="That text doesn’t look like a meal backup."}return render()}
+ if(a==="reset"){if(confirm("Replace everything with the starter meals?")){S=seed();save();note="Reset."}return render()}
+});
+document.addEventListener("change",e=>{
+ const t=e.target;if(t.dataset.a==="rule"){const v=Math.max(0,Math.min(14,parseInt(t.value)||0));S.rules[t.dataset.k][t.dataset.f]=v;
+  const r=S.rules[t.dataset.k];if(r.min>r.max){if(t.dataset.f==="min")r.max=r.min;else r.min=r.max}save();render()}
+});
+render();
+
+</script></body></html>
